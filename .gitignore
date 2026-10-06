@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+# Downloaded by the build workflow (see .github/workflows/build.yml)
+app/libs/*.aar
+app/src/main/assets/voice/

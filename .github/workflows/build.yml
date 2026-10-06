@@ -1,0 +1,75 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish the APK as a release
+
+env:
+  SHERPA_VERSION: "1.13.7"
+  VOICE: vits-piper-en_US-lessac-medium
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache speech engine and voice
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/libs/sherpa-onnx.aar
+            app/src/main/assets/voice
+          key: speech-${{ env.SHERPA_VERSION }}-${{ env.VOICE }}
+
+      - name: Download speech engine and voice
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p app/libs app/src/main/assets
+          curl -fL --retry 3 -o app/libs/sherpa-onnx.aar \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VERSION}/sherpa-onnx-${SHERPA_VERSION}.aar"
+          curl -fL --retry 3 -o voice.tar.bz2 \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${VOICE}.tar.bz2"
+          tar xjf voice.tar.bz2
+          rm -rf app/src/main/assets/voice
+          mv "${VOICE}" app/src/main/assets/voice
+          rm voice.tar.bz2
+          ls -la app/src/main/assets/voice
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Keep APK as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-reader-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish APK to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/debug/app-debug.apk pdf-reader.apk
+          NOTES="Build #${GITHUB_RUN_NUMBER} from ${GITHUB_SHA::7}"
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest pdf-reader.apk --clobber
+            gh release edit latest --notes "$NOTES"
+          else
+            gh release create latest pdf-reader.apk --title "Latest build" --notes "$NOTES"
+          fi
